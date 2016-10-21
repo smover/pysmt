@@ -396,7 +396,8 @@ class MSatConverter(Converter, DagWalker):
         self.boolType = mathsat.msat_get_bool_type(self.msat_env())
         self.realType = mathsat.msat_get_rational_type(self.msat_env())
         self.intType = mathsat.msat_get_integer_type(self.msat_env())
-
+        # Maps msat_type to PySMTTypes
+        self.simpleTypes = {}
         self.back_memoization = {}
 
         # Handling of UF bool args
@@ -558,16 +559,17 @@ class MSatConverter(Converter, DagWalker):
         :type term: MathSAT term
 
         :param mgr: The formula manager to be sued to build the
-        formulae, it should allow for type unsafety.
+                    formulae, it should allow for type unsafety.
         :type mgr: Formula manager
 
         :param args: List of the pysmt formulae obtained by converting
-        all the args (obtained by mathsat.msat_term_get_arg()) to
-        pysmt formulae
+                     all the args (obtained by
+                     mathsat.msat_term_get_arg()) to pysmt formulae
         :type args: List of pysmt formulae
 
         :returns The pysmt formula representing the given term
         :rtype Pysmt formula
+
         """
         res = None
         arity = len(args)
@@ -638,14 +640,26 @@ class MSatConverter(Converter, DagWalker):
                 res = mgr.Symbol(rep, types.INT)
             else:
                 check_arr, idx_type, val_type = mathsat.msat_is_array_type(self.msat_env(), ty)
+                check_bv, width = mathsat.msat_is_bv_type(self.msat_env(), ty)
                 if check_arr:
                     i = self._msat_type_to_type(idx_type)
                     e = self._msat_type_to_type(val_type)
                     res = mgr.Symbol(rep, types.ArrayType(i, e))
-                else:
-                    _, width = mathsat.msat_is_bv_type(self.msat_env(), ty)
-                    assert width is not None, "Unsupported variable type for '%s'"%str(term)
+                elif check_bv:
+                    assert width is not None, "Unsupported width for '%s'"%str(term)
                     res = mgr.Symbol(rep, types.BVType(width))
+                else:
+                    # Custom Type
+                    for candidate_ty in self.simpleTypes:
+                        if mathsat.msat_type_equals(candidate_ty, ty):
+                            pysmt_type = self.simpleTypes[candidate_ty]
+                            rep = mathsat.msat_term_repr(term)
+                            # TODO: Should this be a constant?
+                            return self.mgr.Symbol("%s!%s" % (pysmt_type, rep),
+                                                   pysmt_type)
+                    raise PysmtTypeError("Unknown type: %s"\
+                                         % mathsat.msat_type_repr(ty))
+
 
         elif mathsat.msat_term_is_uf(self.msat_env(), term):
             d = mathsat.msat_term_get_decl(term)
@@ -1097,9 +1111,15 @@ class MSatConverter(Converter, DagWalker):
                 msat_msg = mathsat.msat_last_error_message(self.msat_env())
                 raise InternalSolverError(msat_msg)
             return msat_type
-        else:
-            assert tp.is_bv_type(), "Usupported type for '%s'" % tp
+        elif tp.is_bv_type():
             return mathsat.msat_get_bv_type(self.msat_env(), tp.width)
+        else:
+            # Custom sort
+            assert tp.arity == 0, "MathSAT does not support n-ary Sorts"
+            msat_type =  mathsat.msat_get_simple_type(self.msat_env(),
+                                                      tp.basename)
+            self.simpleTypes[msat_type] = tp
+            return msat_type
 
     def _msat_type_to_type(self, tp):
         """Converts a MathSAT type into a PySMT type."""
@@ -1109,6 +1129,8 @@ class MSatConverter(Converter, DagWalker):
             return types.REAL
         elif mathsat.msat_is_integer_type(self.msat_env(), tp):
             return types.INT
+        elif tp in self.simpleTypes:
+            return self.simpleTypes[tp]
         else:
             check_arr, idx_type, val_type = \
                     mathsat.msat_is_array_type(self.msat_env(), tp)
@@ -1121,8 +1143,14 @@ class MSatConverter(Converter, DagWalker):
             if check_bv != 0:
                 return types.BVType(bv_width)
 
+            for t in self.simpleTypes:
+                if mathsat.msat_type_equals(t, tp):
+                    return self.simpleTypes[t]
+
             # It must be a function type, currently unsupported
-            raise NotImplementedError("Function types are unsupported")
+            tp_str = mathsat.msat_type_repr(tp)
+            raise NotImplementedError("Function types are unsupported: %s",
+                                      tp_str)
 
 
     def declare_variable(self, var):

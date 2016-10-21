@@ -20,9 +20,11 @@ from six import StringIO
 from pysmt.typing import INT, BOOL, REAL
 from pysmt.typing import Type, ArrayType, FunctionType, BVType
 from pysmt.typing import PartialType
-from pysmt.test import TestCase, main
+from pysmt.test import TestCase, main, skipIfNoSolverForLogic
+from pysmt.logics import QF_UF
 from pysmt.smtlib.parser import SmtLibParser
-from pysmt.shortcuts import FreshSymbol, EqualsOrIff, Select, TRUE, FALSE, Function
+from pysmt.shortcuts import (FreshSymbol, EqualsOrIff, Select, TRUE,
+                             FALSE, Function, Solver)
 from pysmt.exceptions import PysmtValueError, PysmtTypeError
 
 
@@ -161,8 +163,16 @@ class TestSorts(TestCase):
         fty2 = fname.symbol_type()
         self.assertFalse(fty2 is fty, fty)
 
+    @skipIfNoSolverForLogic(QF_UF)
     def test_solving_with_custom_sorts(self):
-        pass
+        for sname in self.env.factory.all_solvers(logic=QF_UF):
+            with Solver(name=sname) as s:
+                mytype = Type("Color")
+                x = FreshSymbol(mytype)
+                y = FreshSymbol(mytype)
+                s.add_assertion(EqualsOrIff(x,y))
+                self.assertTrue(s.solve())
+                self.assertEqual(s.get_value(y), s.get_value(x))
 
 
 if __name__ == '__main__':

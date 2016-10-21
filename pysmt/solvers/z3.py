@@ -391,6 +391,7 @@ class Z3Converter(Converter, DagWalker):
         self.z3IntSort  = z3.IntSort(self.ctx)
         self.z3ArraySorts = {}
         self._z3BitVecSorts = {}
+        self._z3CustomSorts = {}
         # Unique reference to Function Declaration
         self._z3_func_decl_cache = {}
         return
@@ -403,6 +404,14 @@ class Z3Converter(Converter, DagWalker):
             bvsort = z3.BitVecSort(width)
             self._z3BitVecSorts[width] = bvsort
         return bvsort
+
+    def z3CustomSort(self, pysmt_type):
+        try:
+            sort = self._z3CustomSorts[pysmt_type]
+        except KeyError:
+            sort = z3.DeclareSort(pysmt_type.basename, ctx=self.ctx)
+            self._z3CustomSorts[pysmt_type] = sort
+        return sort
 
     @catch_conversion_error
     def convert(self, formula):
@@ -432,7 +441,7 @@ class Z3Converter(Converter, DagWalker):
             elif type_.is_bv_type():
                 return z3.BitVecRef(z3term, self.ctx)
             else:
-                raise NotImplementedError(formula)
+                return z3.AstRef(z3term, self.ctx)
         elif formula.node_type() in op.ARRAY_OPERATORS:
             return z3.ArrayRef(z3term, self.ctx)
         else:
@@ -538,11 +547,15 @@ class Z3Converter(Converter, DagWalker):
                 try:
                     return self.mgr.get_symbol(str(expr))
                 except UndefinedSymbolError:
-                    import warnings
-                    symb_type = self._z3_to_type(expr.sort())
-                    warnings.warn("Defining new symbol: %s" % str(res))
-                    return self.mgr.FreshSymbol(symb_type,
-                                                template="__z3_%d")
+                    pass
+                import warnings
+                symb_type = self._z3_to_type(expr.sort())
+                if symb_type in self._z3CustomSorts:
+                    return self.mgr.Symbol("%s!%s" % (symb_type, res),
+                                           symb_type)
+                warnings.warn("Defining new symbol: %s" % str(res))
+                return self.mgr.FreshSymbol(symb_type, "__z3_%d")
+
         elif z3.is_function(expr):
             # This needs to be after we try to convert regular Symbols
             fsymbol = self.mgr.get_symbol(expr.decl().name())
@@ -618,17 +631,7 @@ class Z3Converter(Converter, DagWalker):
         symbol_type = formula.symbol_type()
         sname = formula.symbol_name()
         z3_sname = z3.Z3_mk_string_symbol(self.ctx.ref(), sname)
-        if symbol_type.is_bool_type():
-            sort_ast = self.z3BoolSort.ast
-        elif symbol_type.is_real_type():
-            sort_ast = self.z3RealSort.ast
-        elif symbol_type.is_int_type():
-            sort_ast = self.z3IntSort.ast
-        elif symbol_type.is_array_type():
-            sort_ast = self._type_to_z3(symbol_type).ast
-        else:
-            assert symbol_type.is_bv_type()
-            sort_ast = self._type_to_z3(symbol_type).ast
+        sort_ast = self._type_to_z3(symbol_type).ast
         # Create const with given sort
         res = z3.Z3_mk_const(self.ctx.ref(), z3_sname, sort_ast)
         z3.Z3_inc_ref(self.ctx.ref(), res)
@@ -835,7 +838,7 @@ class Z3Converter(Converter, DagWalker):
         elif sort.kind() == z3.Z3_BV_SORT:
             return types.BVType(sort.size())
         else:
-            raise NotImplementedError("Unsupported sort in conversion: %s" % sort)
+            return types.Type(sort.name())
 
     def _type_to_z3(self, tp):
         """Convert a pySMT type into the corresponding Z3 sort."""
@@ -856,10 +859,12 @@ class Z3Converter(Converter, DagWalker):
                 self.z3ArraySorts[(askey(key_sort),
                                    askey(val_sort))] = sort
                 return sort
-        else:
-            assert tp.is_bv_type() , "Unsupported type '%s'" % tp
+        elif tp.is_bv_type():
             return self.z3BitVecSort(tp.width)
-        raise NotImplementedError("Unsupported type in conversion: %s" % tp)
+        else:
+            # Custom type
+            assert tp.arity == 0, "N-ary sorts are currently unsupported"
+            return self.z3CustomSort(tp)
 
     def __del__(self):
         # Cleaning-up Z3Converter requires dec-ref'ing the terms in the cache
