@@ -73,8 +73,6 @@ def yices_logic(pysmt_logic):
 class YicesOptions(SolverOptions):
     def __init__(self, **base_options):
         SolverOptions.__init__(self, **base_options)
-        # TODO: Yices Supports UnsatCore extraction
-        # but we did not wrapped it yet.
         if self.unsat_cores_mode is not None:
             raise PysmtValueError("'unsat_cores_mode' option not supported.")
 
@@ -275,7 +273,13 @@ class YicesSolver(Solver, SmtLibBasicSolver, SmtLibIgnoreMixin):
             str_val = "".join(str(x) for x in reversed(res))
             return self.mgr.BV("#b" + str_val)
         else:
-            raise NotImplementedError()
+            # Custom Type
+            # TODO: We might be able to use:
+            #  yicespy.yices_val_get_scalar(self.model, val)
+            # However, this is not correctly wrapped in yicespy
+            status, val = yicespy.yices_get_value(self.model, titem)
+            self._check_error(status)
+            return self.mgr.Symbol("%s!%d" % (ty.name, val.node_id))
 
     def _exit(self):
         yicespy.yices_free_context(self.yices)
@@ -296,6 +300,9 @@ class YicesConverter(Converter, DagWalker):
         self.symbol_to_decl = {}
         # Maps an internal yices instance into the corresponding symbol
         self.decl_to_symbol = {}
+        # Maps Custom Types into Yices Uninterpreted Types
+        self.simpleTypes = {}
+        self.simpleTypes_back = {}
 
     @catch_conversion_error
     def convert(self, formula):
@@ -425,9 +432,11 @@ class YicesConverter(Converter, DagWalker):
         res = None
         if tp.is_bv_type():
             res = yicespy.yices_bveq_atom(args[0], args[1])
-        else:
-            assert tp.is_int_type() or tp.is_real_type()
+        elif tp.is_int_type() or tp.is_real_type():
             res = yicespy.yices_arith_eq_atom(args[0], args[1])
+        else:
+            res = yicespy.yices_eq(args[0], args[1])
+
         self._check_term_result(res)
         return res
 
@@ -619,7 +628,15 @@ class YicesConverter(Converter, DagWalker):
         elif tp.is_bv_type():
             return yicespy.yices_bv_type(tp.width)
         else:
-            raise NotImplementedError(tp)
+            # Custom type
+            assert tp.arity == 0, "Only 0-arity types are currently supported."
+            try:
+                return self.simpleTypes[tp]
+            except KeyError:
+                res = yicespy.yices_new_uninterpreted_type()
+                self.simpleTypes[tp] = res
+                self.simpleTypes_back[res] = tp
+                return res
 
     def declare_variable(self, var):
         if not var.is_symbol():
