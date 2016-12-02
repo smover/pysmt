@@ -730,6 +730,8 @@ class MSatConverter(Converter, DagWalker):
 
         while len(stack) > 0:
             current = stack.pop()
+            print(current)
+            # MG: This call goes in segfault!
             arity = mathsat.msat_term_arity(current)
             if current not in self.back_memoization:
                 self.back_memoization[current] = None

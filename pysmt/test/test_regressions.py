@@ -22,7 +22,7 @@ import pysmt.logics as logics
 import pysmt.smtlib.commands as smtcmd
 from pysmt.shortcuts import (Real, Plus, Symbol, Equals, And, Bool, Or,
                              Div, LT, LE, Int, ToReal, Iff, Exists, Times, FALSE,
-                             BVLShr, BVLShl, BVAShr, BV, BVAdd, BVULT, BVMul,
+                             BVLShr, BVLShl, BVAShr, BV, BVAdd, BVULT, BVMul, BVURem,
                              Select, Array)
 from pysmt.shortcuts import Solver, get_env, qelim, get_model, TRUE, ExactlyOne
 from pysmt.typing import REAL, BOOL, INT, BVType, FunctionType, ArrayType
@@ -419,6 +419,20 @@ class TestRegressions(TestCase):
         parts = v.split("-")
         self.assertTrue(len(parts) , 4)
 
+    @skipIfSolverNotAvailable("msat")
+    def test_msat_model_segfault(self):
+        from pysmt.shortcuts import BVZero
+        print("Solving")
+        with Solver(name="msat") as s:
+            bv16 = Symbol("bv16", BVType(16))
+            f = Equals(BVURem(bv16, bv16), BVZero(16))
+            s.add_assertion(f)
+            self.assertTrue(s.solve())
+            for d in f.get_free_variables():
+                print(d)
+                print("MSAT", s.converter.convert(d))
+                m = s.get_value(d)
+                print(m)
 
 if __name__ == "__main__":
     main()
