@@ -15,28 +15,29 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 #
-from fractions import Fraction
 from six.moves import xrange
 from six.moves import cStringIO
 
+import pysmt.logics as logics
+import pysmt.smtlib.commands as smtcmd
 from pysmt.shortcuts import (Real, Plus, Symbol, Equals, And, Bool, Or,
                              Div, LT, LE, Int, ToReal, Iff, Exists, Times, FALSE,
-                             BVLShr, BVLShl, BVAShr, BV, BVAdd, Select)
+                             BVLShr, BVLShl, BVAShr, BV, BVAdd, BVULT, BVMul,
+                             Select, Array)
 from pysmt.shortcuts import Solver, get_env, qelim, get_model, TRUE, ExactlyOne
 from pysmt.typing import REAL, BOOL, INT, BVType, FunctionType, ArrayType
 from pysmt.test import (TestCase, skipIfSolverNotAvailable, skipIfNoSolverForLogic,
                         skipIfNoQEForLogic)
 from pysmt.test import main
-from pysmt.exceptions import ConvertExpressionError
+from pysmt.exceptions import ConvertExpressionError, PysmtValueError
 from pysmt.test.examples import get_example_formulae
 from pysmt.environment import Environment
 from pysmt.rewritings import cnf_as_set
 from pysmt.smtlib.parser import SmtLibParser
-
-import pysmt.logics as logics
-import pysmt.smtlib.commands as smtcmd
+from pysmt.smtlib.commands import DECLARE_FUN
 from pysmt.smtlib.script import SmtLibCommand
 from pysmt.logics import get_closer_smtlib_logic
+from pysmt.constants import Fraction
 
 
 class TestRegressions(TestCase):
@@ -60,7 +61,6 @@ class TestRegressions(TestCase):
         self.assertValid(Equals(p1, p2))
         self.assertValid(Equals(p1, p2), solver_name='z3')
         self.assertValid(Equals(p1, p2), solver_name='msat')
-
 
     def test_substitute_memoization(self):
         a = Symbol("A", BOOL)
@@ -190,7 +190,8 @@ class TestRegressions(TestCase):
             qelim(f)
         except ConvertExpressionError as ex:
             # The modulus operator must be there
-            self.assertIn("%2", str(ex.expression))
+            self.assertTrue("%2" in str(ex.expression) or \
+                            "int_mod_congr" in str(ex.expression))
 
     @skipIfSolverNotAvailable("msat")
     def test_msat_partial_model(self):
@@ -267,14 +268,12 @@ class TestRegressions(TestCase):
         self.assertEqual(new_f, Bool(False))
 
     def test_empty_string_symbol(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PysmtValueError):
             Symbol("")
 
     def test_smtlib_info_quoting(self):
         cmd = SmtLibCommand(smtcmd.SET_INFO, [":source", "This\nis\nmultiline!"])
-        outstream = cStringIO()
-        cmd.serialize(outstream)
-        output = outstream.getvalue()
+        output = cmd.serialize_to_string()
         self.assertEqual(output, "(set-info :source |This\nis\nmultiline!|)")
 
     def test_parse_define_fun(self):
@@ -290,6 +289,33 @@ class TestRegressions(TestCase):
         parser = SmtLibParser()
         buffer_ = cStringIO(smtlib_input)
         parser.get_script(buffer_)
+
+    def test_parse_bvx_var(self):
+        """bvX is a valid identifier."""
+        smtlib_input = """
+        (declare-fun bv1 () (_ BitVec 8))
+        (assert (bvult (_ bv0 8) (bvmul (bvadd bv1 (_ bv1 8)) (_ bv5 8))))
+        (check-sat)"""
+        parser = SmtLibParser()
+        buffer_ = cStringIO(smtlib_input)
+        script = parser.get_script(buffer_)
+        # Check Parsed result
+        iscript = iter(script)
+        cmd = next(iscript)
+        self.assertEqual(cmd.name, DECLARE_FUN)
+        bv1 = cmd.args[0]
+        self.assertEqual(bv1.symbol_type().width, 8)
+        cmd = next(iscript)
+        parsed_f = cmd.args[0]
+        target_f = BVULT(BV(0, 8),
+                         BVMul(BVAdd(bv1, BV(1, 8)), BV(5, 8)))
+        self.assertEqual(parsed_f, target_f)
+
+
+    def test_simplify_times(self):
+        a,b = Real(5), Real((1,5))
+        f = Times(a,b).simplify()
+        self.assertEqual(f.constant_value(), 1)
 
     @skipIfSolverNotAvailable("yices")
     def test_yices_push(self):
@@ -358,6 +384,40 @@ class TestRegressions(TestCase):
             self.assertTrue(s.solve())
             self.assertEqual(s.get_value(Select(x, BV(1, 16))), BV(1, 16))
             self.assertIsNotNone(s.get_value(x))
+
+
+    def test_smtlib_define_fun_serialization(self):
+        smtlib_input = "(define-fun init ((x Bool)) Bool (and x (and x (and x (and x (and x (and x x)))))))"
+        parser = SmtLibParser()
+        buffer_ = cStringIO(smtlib_input)
+        s = parser.get_script(buffer_)
+        for c in s:
+            res = c.serialize_to_string()
+        self.assertEqual(res, smtlib_input)
+
+    @skipIfSolverNotAvailable("z3")
+    def test_z3_nary_back(self):
+        from z3 import Tactic
+        r = Symbol("r", REAL)
+        s = Symbol("s", REAL)
+        t = Symbol("t", REAL)
+        f = Equals(Times(r,s,t), Real(0))
+
+        with Solver(name="z3") as solver:
+            z3_f = solver.converter.convert(f)
+            z3_f = Tactic('simplify')(z3_f).as_expr()
+            fp = solver.converter.back(z3_f)
+            self.assertValid(Iff(f, fp), (f, fp))
+
+    def test_array_initialization_printing(self):
+        self.assertEqual(str(Array(INT, Int(0), {Int(1):Int(2)})), "Array{Int, Int}(0)[1 := 2]")
+
+    def test_git_version(self):
+        from pysmt import git_version
+        v = git_version()
+        self.assertIsNotNone(v)
+        parts = v.split("-")
+        self.assertTrue(len(parts) , 4)
 
 
 if __name__ == "__main__":

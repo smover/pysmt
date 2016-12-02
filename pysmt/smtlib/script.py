@@ -22,11 +22,12 @@ from six.moves import cStringIO
 from six.moves import xrange
 
 import pysmt.smtlib.commands as smtcmd
-from pysmt.exceptions import UnknownSmtLibCommandError, NoLogicAvailableError
-from pysmt.shortcuts import And
+from pysmt.exceptions import (UnknownSmtLibCommandError, NoLogicAvailableError,
+                              UndefinedLogicError, PysmtValueError)
 from pysmt.smtlib.printers import SmtPrinter, SmtDagPrinter, quote
 from pysmt.oracles import get_logic
-from pysmt.logics import get_closer_smtlib_logic
+from pysmt.logics import get_closer_smtlib_logic, Logic, SMTLIB2_LOGICS
+from pysmt.environment import get_env
 
 
 def check_sat_filter(log):
@@ -103,11 +104,12 @@ class SmtLibCommand(namedtuple('SmtLibCommand', ['name', 'args'])):
             params = " ".join(["(%s %s)" % (v, v.symbol_type()) for v in params_list])
             rtype = self.args[2]
             expr = self.args[3]
-            outstream.write("(%s %s (%s) %s %s)" % (self.name,
-                                                    name,
-                                                    params,
-                                                    rtype,
-                                                    expr))
+            outstream.write("(%s %s (%s) %s " % (self.name,
+                                                name,
+                                                params,
+                                                rtype))
+            printer.printer(expr)
+            outstream.write(")")
 
         elif self.name in [smtcmd.PUSH, smtcmd.POP]:
             outstream.write("(%s %d)" % (self.name, self.args[0]))
@@ -168,9 +170,10 @@ class SmtLibScript(object):
     def get_strict_formula(self, mgr=None):
         if self.contains_command(smtcmd.PUSH) or \
            self.contains_command(smtcmd.POP):
-            raise Exception("Was not expecting push-pop commands")
-        assert self.count_command_occurrences(smtcmd.CHECK_SAT) == 1
-        _And = mgr.And if mgr else And
+            raise PysmtValueError("Was not expecting push-pop commands")
+        if self.count_command_occurrences(smtcmd.CHECK_SAT) != 1:
+            raise PysmtValueError("Was expecting exactly one check-sat command")
+        _And = mgr.And if mgr else get_env().formula_manager.And
 
         assertions = [cmd.args[0]
                       for cmd in self.filter_by_command_name([smtcmd.ASSERT])]
@@ -184,7 +187,7 @@ class SmtLibScript(object):
         """
         stack = []
         backtrack = []
-        _And = mgr.And if mgr else And
+        _And = mgr.And if mgr else get_env().formula_manager.And
 
         for cmd in self.commands:
             if cmd.name == smtcmd.ASSERT:
@@ -227,20 +230,31 @@ class SmtLibScript(object):
         return "\n".join((str(cmd) for cmd in self.commands))
 
 
-def smtlibscript_from_formula(formula):
+def smtlibscript_from_formula(formula, logic=None):
     script = SmtLibScript()
 
-    # Get the simplest SmtLib logic that contains the formula
-    f_logic = get_logic(formula)
+    if logic is None:
+        # Get the simplest SmtLib logic that contains the formula
+        f_logic = get_logic(formula)
 
-    smt_logic = None
-    try:
-        smt_logic = get_closer_smtlib_logic(f_logic)
-    except NoLogicAvailableError:
-        warnings.warn("The logic %s is not reducible to any SMTLib2 " \
-                      "standard logic. Proceeding with non-standard " \
-                      "logic '%s'" % (f_logic, f_logic))
-        smt_logic = f_logic
+        smt_logic = None
+        try:
+            smt_logic = get_closer_smtlib_logic(f_logic)
+        except NoLogicAvailableError:
+            warnings.warn("The logic %s is not reducible to any SMTLib2 " \
+                          "standard logic. Proceeding with non-standard " \
+                          "logic '%s'" % (f_logic, f_logic),
+                          stacklevel=3)
+            smt_logic = f_logic
+    elif not (isinstance(logic, Logic) or isinstance(logic, str)):
+        raise UndefinedLogicError(str(logic))
+    else:
+        if logic not in SMTLIB2_LOGICS:
+            warnings.warn("The logic %s is not reducible to any SMTLib2 " \
+                          "standard logic. Proceeding with non-standard " \
+                          "logic '%s'" % (logic, logic),
+                          stacklevel=3)
+        smt_logic = logic
 
     script.add(name=smtcmd.SET_LOGIC,
                args=[smt_logic])

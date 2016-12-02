@@ -16,10 +16,11 @@
 #   limitations under the License.
 #
 
-VERSION = (0, 5, 1, 'dev', 1)
+VERSION = (0, 6, 1, "dev", 1)
 
 # PEP440 Format
-__version__ = "%d.%d.%d%s%d" % VERSION
+__version__ = "%d.%d.%d%s%d" % VERSION if len(VERSION) == 5 else \
+              "%d.%d.%d" % VERSION
 
 
 def git_version():
@@ -37,6 +38,8 @@ def git_version():
         import subprocess
         git_version = subprocess.check_output(["git", "describe", "--dirty=-wip"],
                                               stderr=subprocess.STDOUT)
-        return git_version.strip()
+        return git_version.strip().decode('ascii')
     except subprocess.CalledProcessError:
-        return __version__
+        return __version__ # pragma: no cover
+    except OSError:
+        return __version__ # pragma: no cover
