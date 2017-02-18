@@ -94,7 +94,7 @@ class TestEagerModel(TestCase):
         self.assertFalse(z in model)
 
     @skipIfSolverNotAvailable("z3")
-    def test_warp_solvermodel(self):
+    def test_wrap_solvermodel(self):
         x, y, z = [FreshSymbol() for _ in xrange(3)]
         with Solver(name='z3') as solver:
             solver.add_assertion(And(x,y,z))

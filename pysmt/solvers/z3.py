@@ -143,7 +143,12 @@ class Z3Solver(IncrementalTrackingSolver, UnsatCoreSolver,
                                            environment=environment,
                                            logic=logic,
                                            **options)
-        self.z3 = z3.SolverFor(str(logic))
+        try:
+            print(logic)
+            self.z3 = z3.SolverFor(str(logic))
+        except z3.Z3Exception:
+            print("Unknown logic: %s" % str(logic))
+            self.z3 = z3.Solver()
         self.options(self)
         self.declarations = set()
         self.converter = Z3Converter(environment, z3_ctx=self.z3.ctx)
@@ -876,7 +881,7 @@ class Z3QuantifierEliminator(QuantifierEliminator):
         QuantifierEliminator.__init__(self)
         self.environment = environment
         self.logic = logic
-        self.converter = Z3Converter(environment, z3._get_ctx(None))
+        self.converter = Z3Converter(environment, z3.main_ctx())
 
     def eliminate_quantifiers(self, formula):
         logic = get_logic(formula, self.environment)
@@ -922,7 +927,7 @@ class Z3Interpolator(Interpolator):
         Interpolator.__init__(self)
         self.environment = environment
         self.logic = logic
-        self.converter = Z3Converter(environment, z3_ctx=z3._get_ctx(None))
+        self.converter = Z3Converter(environment, z3_ctx=z3.main_ctx())
 
     def _check_logic(self, formulas):
         for f in formulas:
