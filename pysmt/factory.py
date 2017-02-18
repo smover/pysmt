@@ -231,7 +231,7 @@ class Factory(object):
         self._all_unsat_core_solvers = {}
 
         try:
-            from pysmt.solvers.z3 import Z3Solver
+            from pysmt.solvers.z3prover import Z3Solver
             installed_solvers['z3'] = Z3Solver
         except SolverAPINotFound:
             pass
@@ -296,7 +296,7 @@ class Factory(object):
         self._all_qelims = {}
 
         try:
-            from pysmt.solvers.z3 import Z3QuantifierEliminator
+            from pysmt.solvers.z3prover import Z3QuantifierEliminator
             self._all_qelims['z3'] = Z3QuantifierEliminator
         except SolverAPINotFound:
             pass
@@ -323,7 +323,7 @@ class Factory(object):
         self._all_interpolators = {}
 
         try:
-            from pysmt.solvers.z3 import Z3Interpolator
+            from pysmt.solvers.z3prover import Z3Interpolator
             self._all_interpolators['z3'] = Z3Interpolator
         except SolverAPINotFound:
             pass
