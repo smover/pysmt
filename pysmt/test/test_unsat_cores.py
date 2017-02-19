@@ -42,7 +42,7 @@ class TestUnsatCores(TestCase):
 
                     try:
                         r = solver.solve()
-                        self.assertFalse(r)
+                        self.assertFalse(r, f.serialize())
                     except SolverReturnedUnknownResultError:
                         if QF_BV <= logic:
                             continue # Unsat-core support for QF_UFBV might be

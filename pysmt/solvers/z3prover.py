@@ -144,7 +144,6 @@ class Z3Solver(IncrementalTrackingSolver, UnsatCoreSolver,
                                            logic=logic,
                                            **options)
         try:
-            print(logic)
             self.z3 = z3.SolverFor(str(logic))
         except z3.Z3Exception:
             print("Unknown logic: %s" % str(logic))
