@@ -219,6 +219,7 @@ def main():
         bindings_dir= os.path.expanduser(options.bindings_path)
         if platform.system().lower() == "windows":
             print("set PYTHONPATH=" + bindings_dir + ";%PYTHONPATH%")
+            print("set PATH=" + bindings_dir + ";%PATH%")
         else:
             print("export PYTHONPATH=\"" + bindings_dir + ":${PYTHONPATH}\"")
             print("export LD_LIBRARY_PATH=\"" + bindings_dir + ":${LD_LIBRARY_PATH}\"")
